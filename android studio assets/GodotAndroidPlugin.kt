@@ -1,86 +1,88 @@
-package com.example.mylibrary
+package com.example.mylibrary;
 
+import android.content.Context;
+import android.hardware.input.InputManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.InputDevice;
+import org.godotengine.godot.Godot;
+import org.godotengine.godot.plugin.GodotPlugin;
+import org.godotengine.godot.plugin.SignalInfo;
+import org.godotengine.godot.plugin.UsedByGodot;
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.os.Handler
-import android.os.Looper
-import androidx.core.content.ContextCompat.getSystemService
-import org.godotengine.godot.Godot
-import org.godotengine.godot.plugin.GodotPlugin
-import org.godotengine.godot.plugin.SignalInfo
-import org.godotengine.godot.plugin.UsedByGodot
+public class GodotAndroidPlugin extends GodotPlugin {
 
-
-class GodotAndroidPlugin(godot: Godot): GodotPlugin(godot) {
-
-    override fun getPluginName() = "AndroidInternetConnectionStatePlugin"
-
-    private var stateUpdateDelay: Long = 1500
-    private var preState: Boolean = false
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val emitStateRunnable = Runnable {
-        emitCurrentState()
+    public GodotAndroidPlugin(Godot godot) {
+        super(godot);
+        registerKeyboardCallback();
     }
 
-    init {
-        registerNetworkCallback()
+    @Override
+    public String getPluginName() {
+        return "AndroidGetKeys";
     }
 
-    override fun getPluginSignals(): MutableSet<SignalInfo> {
-        val signals: MutableSet<SignalInfo> = mutableSetOf()
-        signals.add(SignalInfo("hasNetwork", String::class.java))
-        return signals
+    private long stateUpdateDelay = 1500;
+    private boolean preState = false;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable emitStateRunnable = this::emitCurrentState;
+
+    @Override
+    public MutableSet<SignalInfo> getPluginSignals() {
+        MutableSet<SignalInfo> signals = new MutableSet<>();
+        signals.add(new SignalInfo("hasKeyboard", String.class));
+        return signals;
     }
 
-    private fun registerNetworkCallback() {
-        val connectionManager = activity?.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val networkRequest = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .build()
+    private void registerKeyboardCallback() {
+        InputManager inputManager = (InputManager) getActivity().getSystemService(Context.INPUT_SERVICE);
+        InputManager.InputDeviceListener listener = new InputManager.InputDeviceListener() {
+            @Override
+            public void onInputDeviceAdded(int deviceId) {
+                handler.removeCallbacks(emitStateRunnable);
+                handler.postDelayed(emitStateRunnable, stateUpdateDelay);
+            }
 
-        connectionManager.registerNetworkCallback(networkRequest,
-            object: ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    super.onAvailable(network)
-                    handler.removeCallbacks(emitStateRunnable)
-                    handler.postDelayed(emitStateRunnable, stateUpdateDelay)
-                }
+            @Override
+            public void onInputDeviceRemoved(int deviceId) {
+                handler.removeCallbacks(emitStateRunnable);
+                handler.postDelayed(emitStateRunnable, stateUpdateDelay);
+            }
 
-                override fun onLost(network: Network) {
-                    super.onLost(network)
-                    handler.removeCallbacks(emitStateRunnable)
-                    handler.postDelayed(emitStateRunnable, stateUpdateDelay)
-                }
-            })
+            @Override
+            public void onInputDeviceChanged(int deviceId) {
+                handler.removeCallbacks(emitStateRunnable);
+                handler.postDelayed(emitStateRunnable, stateUpdateDelay);
+            }
+        };
+        inputManager.registerInputDeviceListener(listener, handler);
     }
 
-    private fun emitCurrentState() {
-        val networkConnectionState = isNetworkConnected()
+    private void emitCurrentState() {
+        boolean keyboardConnectionState = isKeyboardConnected();
 
-        if (preState == networkConnectionState) {
-            return
+        if (preState == keyboardConnectionState) {
+            return;
         }
 
-        preState = networkConnectionState
+        preState = keyboardConnectionState;
 
-        emitSignal("hasNetwork", "$networkConnectionState")
+        emitSignal("hasKeyboard", String.valueOf(keyboardConnectionState));
     }
 
     @UsedByGodot
-    private fun isNetworkConnected(): Boolean {
-        val connectionManager = activity?.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = connectionManager.activeNetwork
+    private boolean isKeyboardConnected() {
+        InputManager inputManager = (InputManager) getActivity().getSystemService(Context.INPUT_SERVICE);
+        int[] deviceIds = inputManager.getInputDeviceIds();
 
-        val networkCapabilities = connectionManager.getNetworkCapabilities(activeNetwork)
+        for (int deviceId : deviceIds) {
+            InputDevice device = inputManager.getInputDevice(deviceId);
+            if (device != null && (device.getSources() & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD) {
+                return true;
+            }
+        }
 
-        return networkCapabilities != null &&
-                (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                        networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))
+        return false;
     }
 }
